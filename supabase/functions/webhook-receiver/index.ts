@@ -43,7 +43,11 @@ Deno.serve(async (req) => {
       return jsonResponse({ success: false, message: "Method not allowed" }, 405);
     }
 
-    const providedSecret = req.headers.get("x-webhook-secret");
+    // Accept the secret either as a header (if the sender supports custom
+    // headers) or as a ?secret= query param (works with any plain URL field).
+    const url = new URL(req.url);
+    const providedSecret =
+      req.headers.get("x-webhook-secret") ?? url.searchParams.get("secret");
     if (!WEBHOOK_SHARED_SECRET || providedSecret !== WEBHOOK_SHARED_SECRET) {
       return jsonResponse({ success: false, message: "Unauthorized" }, 401);
     }
