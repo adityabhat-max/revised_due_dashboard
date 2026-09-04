@@ -98,16 +98,16 @@ async function getValidZenotiToken(): Promise<string> {
   return await refreshZenotiToken(data.refresh_token as string);
 }
 
-async function fetchZenotiInvoice(invoiceId: string, token: string): Promise<Response> {
-  return await fetch(
-    `https://api.zenoti.com/v1/invoices/${invoiceId}?expand=InvoiceItems`,
-    { headers: { Authorization: `bearer ${token}` } },
-  );
-}
-
-async function fetchAndStoreOpenInvoice(invoiceId: string): Promise<void> {
+// `expand` only takes one value per call - passing a comma-separated list
+// (as the docs imply is possible) silently drops the fields for every value
+// but the last, so a full invoice record takes two separate calls.
+async function fetchZenotiInvoiceExpand(
+  invoiceId: string,
+  expand: "InvoiceItems" | "Transactions",
+): Promise<Record<string, unknown>> {
+  const url = `https://api.zenoti.com/v1/invoices/${invoiceId}?expand=${expand}`;
   let token = await getValidZenotiToken();
-  let resp = await fetchZenotiInvoice(invoiceId, token);
+  let resp = await fetch(url, { headers: { Authorization: `bearer ${token}` } });
 
   if (resp.status === 401) {
     const { data } = await supabase
@@ -117,21 +117,32 @@ async function fetchAndStoreOpenInvoice(invoiceId: string): Promise<void> {
       .single();
     if (!data) throw new Error("no zenoti token stored to refresh from");
     token = await refreshZenotiToken(data.refresh_token as string);
-    resp = await fetchZenotiInvoice(invoiceId, token);
+    resp = await fetch(url, { headers: { Authorization: `bearer ${token}` } });
   }
 
   const json = await resp.json();
   if (!resp.ok || !json.invoice) {
-    throw new Error(`zenoti invoice fetch failed for ${invoiceId}: ${JSON.stringify(json)}`);
+    throw new Error(`zenoti invoice fetch (${expand}) failed for ${invoiceId}: ${JSON.stringify(json)}`);
   }
+  return json.invoice as Record<string, unknown>;
+}
+
+async function fetchAndStoreOpenInvoice(invoiceId: string): Promise<void> {
+  const itemsInvoice = await fetchZenotiInvoiceExpand(invoiceId, "InvoiceItems");
+  const txnsInvoice = await fetchZenotiInvoiceExpand(invoiceId, "Transactions");
 
   const flattened: Record<string, unknown> = {};
-  flattenObject(json.invoice, flattened);
+  flattenObject(itemsInvoice, flattened);
 
   const { error } = await supabase
     .from("zenoti_open_invoices")
     .upsert(
-      { invoice_id: invoiceId, payload: flattened, fetched_at: new Date().toISOString() },
+      {
+        invoice_id: invoiceId,
+        payload: flattened,
+        transactions: txnsInvoice.transactions ?? [],
+        fetched_at: new Date().toISOString(),
+      },
       { onConflict: "invoice_id" },
     );
   if (error) throw new Error(`storing open invoice failed: ${error.message}`);
