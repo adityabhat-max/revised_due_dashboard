@@ -163,7 +163,13 @@ async function enrichFromZenoti(data: Record<string, unknown>): Promise<void> {
   const eventData = data.data as Record<string, unknown> | undefined;
   if (!eventData) return;
 
-  if (eventType === "Invoice.Payments.Added" && eventData.is_closed === false) {
+  if (
+    (eventType === "Invoice.Payments.Added" || eventType === "Invoice.Payments.Deleted") &&
+    eventData.is_closed === false
+  ) {
+    // Deleted (reversed) payments need the same re-fetch as Added ones -
+    // the view excludes deleted transaction_ids explicitly, but keeping the
+    // cached snapshot current too avoids it drifting from Zenoti's own state.
     const invoiceId = eventData.invoice_id as string | undefined;
     if (invoiceId) await fetchAndStoreOpenInvoice(invoiceId);
   } else if (eventType === "Invoice.Closed") {
