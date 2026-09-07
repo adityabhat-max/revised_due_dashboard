@@ -1,21 +1,33 @@
-# Due Invoices Dashboard
+# Due Invoices Dashboard (Supabase-backed)
 
-Live, searchable dashboard of outstanding due invoices for Isaac Wellness, reading
-from the **"Payment terms"** tab of the shared Google Sheet. Built with Next.js,
-deployed on Vercel.
+Live, searchable dashboard of outstanding due invoices for Isaac Wellness. This
+is a variant of the original Google-Sheets-backed dashboard, with the data
+layer swapped: invoices now come from Supabase's `due_invoices_report` view
+instead of the "Payment terms" Google Sheet tab. The Supabase side pulls
+directly from Zenoti's Sales - Accrual report on a schedule (every 30 minutes)
+rather than a Playwright-scraped export uploaded to Sheets. Everything else —
+UI, filters, CSV export, auth, the staff roster (still read from Sheets, no
+Supabase equivalent yet) — is unchanged. Built with Next.js, deployed on Vercel.
 
-Data is fetched fresh from Google Sheets on every page load (via `/api/data`) —
+Data is fetched fresh from Supabase on every page load (via `/api/data`) —
 this is not a static snapshot. Access is per-account: each login has its own
 email/password and its own **scope** — an admin account sees every center,
 a center-restricted account only ever sees that one center's data (enforced
 server-side, not just hidden in the UI).
 
+**Known gap**: Zenoti's own report has an inherent ~1 day lag - same-day
+activity won't appear until Zenoti finalizes that day, typically overnight.
+Everything through yesterday is accurate and refreshes every 30 minutes.
+
 ## Local development
 
 1. Copy `.env.example` to `.env.local` and fill in:
-   - `GOOGLE_SHEET_ID` — the sheet's ID (from its URL, between `/d/` and `/edit`)
-   - `SERVICE_ACCOUNT_JSON` — the full contents of the Google service-account key
-     JSON file, as one line
+   - `SUPABASE_URL` — the Supabase project URL
+   - `SUPABASE_SERVICE_ROLE_KEY` — the project's service-role key (server-only,
+     never exposed to the browser; `due_invoices_report` only grants access to
+     this role)
+   - `GOOGLE_SHEET_ID` / `SERVICE_ACCOUNT_JSON` — still needed for the staff
+     roster, which hasn't moved to Supabase
    - `DASHBOARD_USERS` — a JSON array of accounts (see `.env.example` for the
      exact shape and how to generate a password hash)
 2. Install dependencies and run:
@@ -32,8 +44,9 @@ server-side, not just hidden in the UI).
 2. In Vercel, "Add New Project" → import this GitHub repo. It auto-detects
    Next.js, no config needed.
 3. Before the first deploy (or in Project Settings → Environment Variables
-   afterward), add the same variables as above: `GOOGLE_SHEET_ID`,
-   `SERVICE_ACCOUNT_JSON`, `DASHBOARD_USERS`.
+   afterward), add the same variables as above: `SUPABASE_URL`,
+   `SUPABASE_SERVICE_ROLE_KEY`, `GOOGLE_SHEET_ID`, `SERVICE_ACCOUNT_JSON`,
+   `DASHBOARD_USERS`.
 4. Deploy. If `DASHBOARD_USERS` is missing or invalid, every page will show a
    plain 500 error explaining that — fix it and redeploy.
 
@@ -73,15 +86,17 @@ copy it exactly, including punctuation).
 
 ## Data model
 
-`src/lib/sheets.ts` reads the "Payment terms" tab directly via the Google
-Sheets API (read-only scope) and returns every line-item row, typed. The
-dashboard page (`src/app/page.tsx`) does all filtering/sorting/searching
-client-side against whatever dataset `/api/data` returned for that account
-(already scoped server-side, if applicable) — no further server-side query
-params.
+`src/lib/supabase-invoices.ts` queries Supabase's `due_invoices_report` view
+(service-role only) and maps it to the same `InvoiceRow` shape the original
+Sheets-backed `src/lib/sheets.ts` used, converting dates to `DD-MM-YYYY` to
+match what the rest of this app expects. `src/lib/sheets.ts` is still used,
+but only for `fetchRoster()` now. The dashboard page (`src/app/page.tsx`)
+does all filtering/sorting/searching client-side against whatever dataset
+`/api/data` returned for that account (already scoped server-side, if
+applicable) — no further server-side query params.
 
 Each row is one line item on an invoice — one invoice can have multiple rows
 (multiple purchased items). The 1st/2nd/3rd Payment Date/Amount columns are
 populated when staff have written a payment plan into that invoice's Invoice
-Notes in the source Zenoti report (see the separate `payment_notes_parser.py`
-tool in the `DUE INVOICE` project) — most rows won't have one yet.
+Notes; Supabase parses this the same way the original `payment_notes_parser.py`
+tool did — most rows won't have one yet.
