@@ -28,7 +28,9 @@ export async function GET(req: NextRequest) {
 
     // Roster failure shouldn't take down the whole dashboard — the invoice
     // table is the primary content. Fall back to an empty roster and note
-    // the error instead.
+    // the error instead. This is also what makes Google Sheets optional in
+    // deployment: without GOOGLE_SHEET_ID/SERVICE_ACCOUNT_JSON set, this
+    // just falls into the catch below and the rest of the app works fine.
     let roster: Record<string, string[]> = {};
     let rosterError: string | null = null;
     try {
