@@ -444,16 +444,25 @@ export default function DashboardPage() {
   }, [invoices]);
 
   const soldByList = useMemo(() => {
-    // Sourced from the Sheet6 staff roster (scoped to the selected
-    // center(s)), not from who happens to have a due invoice — so everyone
-    // on staff is selectable, including people with zero invoices right now.
-    if (centerFilter.length === 0) {
-      const set = new Set(Object.values(roster).flat());
-      return Array.from(set).sort();
-    }
-    const set = new Set(centerFilter.flatMap((c) => roster[c] || []));
+    // Prefer the Sheet6 staff roster when available (scoped to the selected
+    // center(s)) — it includes everyone on staff, even people with zero due
+    // invoices right now. Google Sheets is optional in this deployment
+    // though, so fall back to (and merge in) whoever actually appears in
+    // the loaded invoices, the same way createdByList already works —
+    // otherwise this list is silently empty whenever roster isn't configured.
+    const rosterNames =
+      centerFilter.length === 0
+        ? Object.values(roster).flat()
+        : centerFilter.flatMap((c) => roster[c] || []);
+
+    const invoiceNames = (invoices || [])
+      .filter((r) => centerFilter.length === 0 || centerFilter.includes(r.centerName))
+      .map((r) => r.soldBy)
+      .filter(Boolean);
+
+    const set = new Set([...rosterNames, ...invoiceNames]);
     return Array.from(set).sort();
-  }, [roster, centerFilter]);
+  }, [roster, centerFilter, invoices]);
 
   function handleCenterChange(next: string[]) {
     setCenterFilter(next);
