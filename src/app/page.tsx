@@ -127,15 +127,6 @@ function getTodayIso(): string {
   return `${yyyy}-${mm}-${dd}`;
 }
 
-function getYesterdayIso(): string {
-  const d = new Date();
-  d.setDate(d.getDate() - 1);
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  const dd = String(d.getDate()).padStart(2, "0");
-  return `${yyyy}-${mm}-${dd}`;
-}
-
 // Earliest Sale Date with real data — matches "Payment terms" tab coverage.
 const EARLIEST_SALE_DATE_ISO = "2026-08-13";
 
@@ -372,11 +363,10 @@ export default function DashboardPage() {
   const [collectedFilter, setCollectedFilter] = useState<string[]>([]);
   // Package + Product checked by default, Service excluded.
   const [itemTypeFilter, setItemTypeFilter] = useState<string[]>(DEFAULT_ITEM_TYPES);
-  // Sale Date range filter. saleDateEnd defaults to "yesterday" (set in
-  // the mount effect below, client-side only) — today's rows are
-  // excluded by default since a same-day scrape may still be
-  // incomplete; widen this to include today whenever that's wanted.
-  // saleDateStart stays open-ended by default (no lower bound).
+  // Sale Date range filter. saleDateEnd defaults to "today" (set in the
+  // mount effect below, client-side only) — today's data is real now via
+  // the same-day supplement, so it's included by default like everything
+  // else. saleDateStart stays open-ended by default (no lower bound).
   const [saleDateStart, setSaleDateStart] = useState<string>("");
   const [saleDateEnd, setSaleDateEnd] = useState<string>("");
   const [sortKey, setSortKey] = useState<SortKey>("due");
@@ -405,7 +395,7 @@ export default function DashboardPage() {
 
   useEffect(() => {
     load();
-    setSaleDateEnd(getYesterdayIso());
+    setSaleDateEnd(getTodayIso());
     setTodayIso(getTodayIso());
   }, []);
 
@@ -646,7 +636,7 @@ export default function DashboardPage() {
             </div>
           </div>
           <p className="text-sm text-[#a8988d] mt-2">
-            Live from the &quot;Payment terms&quot; sheet · Due invoices from 13 Aug 2026 to yesterday
+            Live from Supabase (synced every 10 minutes, today included) · Due invoices from the last 30 days
           </p>
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-[#7a685e] mt-2">
             <span className="inline-flex items-center gap-1.5">
@@ -709,7 +699,7 @@ export default function DashboardPage() {
                 aria-label="Sale date from"
                 value={saleDateStart}
                 min={EARLIEST_SALE_DATE_ISO}
-                max={getYesterdayIso()}
+                max={getTodayIso()}
                 onChange={(e) => setSaleDateStart(e.target.value)}
                 className="border border-[#e7dcd4] rounded-lg px-2 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#7a2e40] focus:border-transparent"
               />
@@ -719,7 +709,7 @@ export default function DashboardPage() {
                 aria-label="Sale date to"
                 value={saleDateEnd}
                 min={EARLIEST_SALE_DATE_ISO}
-                max={getYesterdayIso()}
+                max={getTodayIso()}
                 onChange={(e) => setSaleDateEnd(e.target.value)}
                 className="border border-[#e7dcd4] rounded-lg px-2 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#7a2e40] focus:border-transparent"
               />
@@ -760,11 +750,12 @@ export default function DashboardPage() {
               dueFilter !== "All" ||
               collectedFilter.length > 0 ||
               saleDateStart !== "" ||
-              // Comparing against a freshly-computed "yesterday" rather
-              // than a fixed default — moving the end date away from
-              // yesterday (e.g. widening to include today) counts as an
-              // active filter worth offering to clear back to baseline.
-              saleDateEnd !== getYesterdayIso() ||
+              // Comparing against a freshly-computed "today" rather than a
+              // fixed default — narrowing the end date away from today
+              // counts as an active filter worth offering to clear back to
+              // baseline (today's data is real now, via the same-day
+              // supplement, so it's the default upper bound, not yesterday).
+              saleDateEnd !== getTodayIso() ||
               query) && (
               <button
                 onClick={() => {
@@ -778,7 +769,7 @@ export default function DashboardPage() {
                   setDueFilter("All");
                   setCollectedFilter([]);
                   setSaleDateStart("");
-                  setSaleDateEnd(getYesterdayIso());
+                  setSaleDateEnd(getTodayIso());
                 }}
                 className="text-sm px-3 py-1.5 rounded-lg text-[#7a2e40] hover:bg-[#f6e2e7] transition-colors"
               >
