@@ -44,3 +44,6 @@ next-env.d.ts
 # stray local files, not part of the app - never publish
 /All Employees Master Data - ISAAC Luxe (40).xlsx
 /Screenshot 2026-08-28 111157.png
+
+.vercel
+.env*

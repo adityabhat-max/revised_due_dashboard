@@ -42,6 +42,12 @@ export async function GET(req: NextRequest) {
     if (user.scope !== "all") {
       invoices = invoices.filter((r) => r.centerName === user.scope);
       roster = { [user.scope]: roster[user.scope] || [] };
+    } else {
+      // ZTraining Center is a pilot data source under UAT (see the
+      // ztraining-pilot scoped account) - it isn't a real center, so it
+      // stays out of the normal "all centers" view until it's folded into
+      // production for real.
+      invoices = invoices.filter((r) => r.centerName !== "ZTraining Center");
     }
 
     return NextResponse.json({
