@@ -173,15 +173,20 @@ function getDataIssues(row: InvoiceRow): DataIssue[] {
   const issues: DataIssue[] = [];
 
   if (row.payment1Amount != null) {
+    // The plan documents the invoice's full payment schedule - past
+    // installments already collected included, not just what's still
+    // owed - so it should reconcile against the full Sales (Inc. Tax),
+    // not against Due (e.g. a 2-installment plan where the 1st was
+    // already paid and only the 2nd remains still sums to the total).
     const planTotal = (row.payment1Amount ?? 0) + (row.payment2Amount ?? 0) + (row.payment3Amount ?? 0);
-    const diff = planTotal - row.due;
+    const diff = planTotal - row.salesIncTax;
     if (Math.abs(diff) > AMOUNT_TOLERANCE) {
       issues.push({
-        label: "Payment plan doesn't match Due",
+        label: "Payment plan doesn't match Sales (Inc. Tax)",
         detail:
           diff > 0
-            ? `Installments add up to ₹${formatINR(planTotal)} — ₹${formatINR(diff)} more than the ₹${formatINR(row.due)} still Due.`
-            : `Installments add up to ₹${formatINR(planTotal)} — ₹${formatINR(-diff)} short of the ₹${formatINR(row.due)} still Due.`,
+            ? `Installments add up to ₹${formatINR(planTotal)} — ₹${formatINR(diff)} more than the ₹${formatINR(row.salesIncTax)} invoice total.`
+            : `Installments add up to ₹${formatINR(planTotal)} — ₹${formatINR(-diff)} short of the ₹${formatINR(row.salesIncTax)} invoice total.`,
       });
     }
   }
@@ -896,12 +901,12 @@ export default function DashboardPage() {
                         {hasPaymentPlan(row) ? (
                           <span
                             className={`inline-flex items-center rounded-full text-xs font-medium px-1.5 py-0.5 ${
-                              issues.some((i) => i.label === "Payment plan doesn't match Due")
+                              issues.some((i) => i.label === "Payment plan doesn't match Sales (Inc. Tax)")
                                 ? "bg-[#f3d4d4] text-[#8a2e2e]"
                                 : "bg-[#e3ece7] text-[#3f5f4f]"
                             }`}
                           >
-                            {issues.some((i) => i.label === "Payment plan doesn't match Due") ? "Mismatch" : "Yes"}
+                            {issues.some((i) => i.label === "Payment plan doesn't match Sales (Inc. Tax)") ? "Mismatch" : "Yes"}
                           </span>
                         ) : (
                           <span className="text-[#c3b8ae] text-xs">—</span>
