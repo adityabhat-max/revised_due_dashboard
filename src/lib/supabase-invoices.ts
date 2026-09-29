@@ -81,8 +81,10 @@ async function fetchAllDueRows(): Promise<SupabaseDueRow[]> {
 
   for (let from = 0; ; from = rows.length) {
     let query = supabase.from("due_invoices_report").select("*");
+    // Quoted: PostgREST can't parse bare names with parentheses/dots like
+    // "Sales (Inc. Tax)" in an order clause.
     for (const col of ORDER_COLUMNS) {
-      query = query.order(col, { ascending: true, nullsFirst: true });
+      query = query.order(`"${col}"`, { ascending: true, nullsFirst: true });
     }
     const { data, error } = await query
       .range(from, from + PAGE_SIZE - 1)
