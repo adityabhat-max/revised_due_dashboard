@@ -52,15 +52,52 @@ interface SupabaseDueRow {
   "3rd Payment Amount": number | null;
 }
 
-export async function fetchInvoicesFromSupabase(): Promise<InvoiceRow[]> {
-  const supabase = getSupabaseClient();
-  const { data, error } = await supabase
-    .from("due_invoices_report")
-    .select("*")
-    .returns<SupabaseDueRow[]>();
+// PostgREST caps every response at the project's max-rows setting (1000 by
+// default) and silently truncates past it - so the view has to be read in
+// pages until an empty page comes back, or totals quietly undercount once
+// there are more due line items than that. Offsets advance by however many
+// rows actually came back (not PAGE_SIZE), so a max-rows set lower than
+// PAGE_SIZE still can't skip anything.
+const PAGE_SIZE = 1000;
 
-  if (error) throw new Error(`Supabase due_invoices_report query failed: ${error.message}`);
-  if (!data) return [];
+// A view has no primary key, so pages need an explicit, as-close-to-unique
+// ordering - otherwise Postgres is free to return tied rows in a different
+// order per request, duplicating some rows across page boundaries and
+// skipping others.
+const ORDER_COLUMNS = [
+  "Sale Date",
+  "Invoice No",
+  "Item",
+  "Item Type",
+  "Sold By",
+  "Sales (Inc. Tax)",
+  "Collected",
+  "Due",
+];
+
+async function fetchAllDueRows(): Promise<SupabaseDueRow[]> {
+  const supabase = getSupabaseClient();
+  const rows: SupabaseDueRow[] = [];
+
+  for (let from = 0; ; from = rows.length) {
+    let query = supabase.from("due_invoices_report").select("*");
+    for (const col of ORDER_COLUMNS) {
+      query = query.order(col, { ascending: true, nullsFirst: true });
+    }
+    const { data, error } = await query
+      .range(from, from + PAGE_SIZE - 1)
+      .returns<SupabaseDueRow[]>();
+
+    if (error) throw new Error(`Supabase due_invoices_report query failed: ${error.message}`);
+    if (!data || data.length === 0) break;
+    rows.push(...data);
+  }
+
+  return rows;
+}
+
+export async function fetchInvoicesFromSupabase(): Promise<InvoiceRow[]> {
+  const data = await fetchAllDueRows();
 
   return data.map((row) => ({
     itemType: row["Item Type"] ?? "",
