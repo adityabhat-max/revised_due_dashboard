@@ -262,6 +262,8 @@ function FilterSelect({
 // to this exact set rather than to nothing.
 const DEFAULT_ITEM_TYPES = ["Package", "Product"];
 
+const AUTO_REFRESH_MS = 30_000;
+
 function sameSet(a: string[], b: string[]): boolean {
   if (a.length !== b.length) return false;
   const bSet = new Set(b);
@@ -378,9 +380,16 @@ export default function DashboardPage() {
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [selected, setSelected] = useState<InvoiceRow | null>(null);
 
-  async function load() {
-    setLoading(true);
-    setError(null);
+  const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
+
+  // `background` is the auto-refresh: it swaps the data in place without
+  // blanking the table/KPIs to "…", and a failed poll keeps showing the last
+  // good data instead of replacing it with an error.
+  async function load(background = false) {
+    if (!background) {
+      setLoading(true);
+      setError(null);
+    }
     try {
       const res = await fetch("/api/data", { cache: "no-store" });
       const data = await res.json();
@@ -389,10 +398,12 @@ export default function DashboardPage() {
       setRoster(data.roster || {});
       setUserEmail(data.email || "");
       setUserScope(data.scope || "all");
+      setUpdatedAt(new Date());
+      setError(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load data");
+      if (!background) setError(e instanceof Error ? e.message : "Failed to load data");
     } finally {
-      setLoading(false);
+      if (!background) setLoading(false);
     }
   }
 
@@ -402,6 +413,23 @@ export default function DashboardPage() {
     load();
     setSaleDateEnd(getTodayIso());
     setTodayIso(getTodayIso());
+  }, []);
+
+  // The backend picks up payments within ~15s (webhook-triggered sync, plus
+  // a sync every minute), so poll at a similar pace while the tab is
+  // visible, and catch up immediately when it's brought back into view.
+  useEffect(() => {
+    const id = setInterval(() => {
+      if (document.visibilityState === "visible") load(true);
+    }, AUTO_REFRESH_MS);
+    const onVisible = () => {
+      if (document.visibilityState === "visible") load(true);
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
   }, []);
 
   async function handleLogout() {
@@ -610,8 +638,13 @@ export default function DashboardPage() {
           <div className="flex flex-wrap items-baseline justify-between gap-3">
             <h1 className="text-3xl font-serif">Due Invoices Dashboard</h1>
             <div className="flex items-center gap-3">
+              {updatedAt && (
+                <span className="text-xs text-[#a8988d]" title="Refreshes automatically every 30 seconds">
+                  Updated {updatedAt.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+                </span>
+              )}
               <button
-                onClick={load}
+                onClick={() => load()}
                 disabled={loading}
                 className="text-sm px-3 py-1.5 rounded-lg border border-[#e7dcd4] bg-white hover:bg-[#f6e2e7] transition-colors disabled:opacity-50"
               >
