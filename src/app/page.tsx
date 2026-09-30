@@ -971,6 +971,18 @@ function DetailPanel({ row, onClose }: { row: InvoiceRow; onClose: () => void })
   const planTotal = installments.reduce((sum, p) => sum + (p.amount ?? 0), 0);
   const urgency = paymentUrgency(row.nextPaymentDate, getTodayIso());
   const issues = getDataIssues(row);
+  const [copied, setCopied] = useState(false);
+
+  async function handleCopyInvoiceNo() {
+    try {
+      await navigator.clipboard.writeText(row.invoiceNo);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // Clipboard API can be unavailable (permissions, non-HTTPS context) -
+      // silently do nothing rather than show a broken "Copied" state.
+    }
+  }
 
   return (
     <div
@@ -1000,7 +1012,16 @@ function DetailPanel({ row, onClose }: { row: InvoiceRow; onClose: () => void })
         <dl className="grid grid-cols-2 gap-x-4 gap-y-3 text-sm mb-5">
           <div>
             <dt className="text-[#a8988d] text-xs uppercase tracking-wide mb-0.5">Invoice Number</dt>
-            <dd>{row.invoiceNo}</dd>
+            <dd className="flex items-center gap-2">
+              {row.invoiceNo}
+              <button
+                onClick={handleCopyInvoiceNo}
+                className="text-xs text-[#7a2e40] hover:text-[#5a1e2d] border border-[#e7dcd4] rounded px-1.5 py-0.5"
+                aria-label="Copy invoice number"
+              >
+                {copied ? "Copied" : "Copy"}
+              </button>
+            </dd>
           </div>
           <div>
             <dt className="text-[#a8988d] text-xs uppercase tracking-wide mb-0.5">Center</dt>
