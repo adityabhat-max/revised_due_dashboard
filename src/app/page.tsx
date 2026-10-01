@@ -678,9 +678,6 @@ export default function DashboardPage() {
               )}
             </div>
           </div>
-          <p className="text-sm text-[#a8988d] mt-2">
-            Live from Supabase (synced every 10 minutes, today included) · Due invoices from the last 30 days
-          </p>
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-[#7a685e] mt-2">
             <span className="inline-flex items-center gap-1.5">
               <span className="inline-block w-3 h-3 rounded-sm bg-[#fbeaea] border border-[#e7b3b3]" />
