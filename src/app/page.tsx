@@ -381,7 +381,7 @@ export default function DashboardPage() {
   // else. saleDateStart stays open-ended by default (no lower bound).
   const [saleDateStart, setSaleDateStart] = useState<string>("");
   const [saleDateEnd, setSaleDateEnd] = useState<string>("");
-  const [sortKey, setSortKey] = useState<SortKey>("due");
+  const [sortKey, setSortKey] = useState<SortKey>("saleDate");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [selected, setSelected] = useState<InvoiceRow | null>(null);
 
