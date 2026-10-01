@@ -127,9 +127,6 @@ function getTodayIso(): string {
   return `${yyyy}-${mm}-${dd}`;
 }
 
-// Earliest Sale Date with real data — matches "Payment terms" tab coverage.
-const EARLIEST_SALE_DATE_ISO = "2026-08-13";
-
 function addDaysIso(iso: string, days: number): string {
   const [y, m, d] = iso.split("-").map(Number);
   const dt = new Date(y, m - 1, d);
@@ -138,6 +135,14 @@ function addDaysIso(iso: string, days: number): string {
   const mm = String(dt.getMonth() + 1).padStart(2, "0");
   const dd = String(dt.getDate()).padStart(2, "0");
   return `${yyyy}-${mm}-${dd}`;
+}
+
+// due_invoices_report only ever covers a rolling last-30-days window
+// (today back through 29 days ago) - a fixed earliest date would drift out
+// of sync with that window a little more every day, eventually letting
+// staff pick date ranges the backend can never actually return data for.
+function earliestSaleDateIso(): string {
+  return addDaysIso(getTodayIso(), -29);
 }
 
 type PaymentUrgency = "overdue" | "soon" | null;
@@ -736,7 +741,7 @@ export default function DashboardPage() {
                 type="date"
                 aria-label="Sale date from"
                 value={saleDateStart}
-                min={EARLIEST_SALE_DATE_ISO}
+                min={earliestSaleDateIso()}
                 max={getTodayIso()}
                 onChange={(e) => setSaleDateStart(e.target.value)}
                 className="border border-[#e7dcd4] rounded-lg px-2 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#7a2e40] focus:border-transparent"
@@ -746,7 +751,7 @@ export default function DashboardPage() {
                 type="date"
                 aria-label="Sale date to"
                 value={saleDateEnd}
-                min={EARLIEST_SALE_DATE_ISO}
+                min={earliestSaleDateIso()}
                 max={getTodayIso()}
                 onChange={(e) => setSaleDateEnd(e.target.value)}
                 className="border border-[#e7dcd4] rounded-lg px-2 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#7a2e40] focus:border-transparent"
