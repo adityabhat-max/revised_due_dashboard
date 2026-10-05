@@ -174,7 +174,16 @@ interface DataIssue {
 // set, the plan is already complete, not partially filled in. That
 // means the installments can always be summed and checked as soon as
 // any of them exist, no "wait until all 3 are filled" logic needed.
-function getDataIssues(row: InvoiceRow): DataIssue[] {
+//
+// invoiceSalesTotal defaults to this row's own Sales (Inc. Tax) but
+// should be passed as the sum across every line item on the invoice —
+// the payment-plan note is invoice-level (identical on every item row
+// of a multi-item invoice), while Sales (Inc. Tax) is per line item, so
+// comparing the plan against a single item's share of a multi-item
+// invoice flags a false mismatch every time (confirmed live: GKR68693,
+// a 2-item invoice, has its real plan compared against each item's
+// ~28%/72% split instead of the invoice's actual total).
+function getDataIssues(row: InvoiceRow, invoiceSalesTotal: number = row.salesIncTax): DataIssue[] {
   const issues: DataIssue[] = [];
 
   if (row.payment1Amount != null) {
@@ -184,14 +193,14 @@ function getDataIssues(row: InvoiceRow): DataIssue[] {
     // not against Due (e.g. a 2-installment plan where the 1st was
     // already paid and only the 2nd remains still sums to the total).
     const planTotal = (row.payment1Amount ?? 0) + (row.payment2Amount ?? 0) + (row.payment3Amount ?? 0);
-    const diff = planTotal - row.salesIncTax;
+    const diff = planTotal - invoiceSalesTotal;
     if (Math.abs(diff) > AMOUNT_TOLERANCE) {
       issues.push({
         label: "Payment plan doesn't match Sales (Inc. Tax)",
         detail:
           diff > 0
-            ? `Installments add up to ₹${formatINR(planTotal)} — ₹${formatINR(diff)} more than the ₹${formatINR(row.salesIncTax)} invoice total.`
-            : `Installments add up to ₹${formatINR(planTotal)} — ₹${formatINR(-diff)} short of the ₹${formatINR(row.salesIncTax)} invoice total.`,
+            ? `Installments add up to ₹${formatINR(planTotal)} — ₹${formatINR(diff)} more than the ₹${formatINR(invoiceSalesTotal)} invoice total.`
+            : `Installments add up to ₹${formatINR(planTotal)} — ₹${formatINR(-diff)} short of the ₹${formatINR(invoiceSalesTotal)} invoice total.`,
       });
     }
   }
@@ -372,6 +381,8 @@ export default function DashboardPage() {
   const [nextPaymentFilter, setNextPaymentFilter] = useState<"All" | "Has" | "None">("All");
   const [planFilter, setPlanFilter] = useState<"All" | "Has" | "None">("All");
   const [dueFilter, setDueFilter] = useState<"All" | "DueOnly" | "PaidOff">("All");
+  const [urgencyFilter, setUrgencyFilter] = useState<"All" | "Overdue" | "Soon">("All");
+  const [reconcileFilter, setReconcileFilter] = useState<"All" | "Mismatch">("All");
   const [collectedFilter, setCollectedFilter] = useState<string[]>([]);
   // Package + Product checked by default, Service excluded.
   const [itemTypeFilter, setItemTypeFilter] = useState<string[]>(DEFAULT_ITEM_TYPES);
@@ -471,6 +482,23 @@ export default function DashboardPage() {
     return buildCollectedBuckets(max);
   }, [invoices]);
 
+  // Sum of Sales (Inc. Tax) across every line item sharing an Invoice No —
+  // computed from the full unfiltered dataset so it's always the real
+  // invoice total regardless of which items happen to be filtered in/out.
+  // Feeds getDataIssues's payment-plan check (see its comment above).
+  const invoiceTotalsMap = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const r of invoices || []) {
+      if (!r.invoiceNo) continue;
+      map.set(r.invoiceNo, (map.get(r.invoiceNo) || 0) + r.salesIncTax);
+    }
+    return map;
+  }, [invoices]);
+
+  function invoiceSalesTotalFor(row: InvoiceRow): number {
+    return invoiceTotalsMap.get(row.invoiceNo) ?? row.salesIncTax;
+  }
+
   const soldByList = useMemo(() => {
     // Prefer the Sheet6 staff roster when available (scoped to the selected
     // center(s)) — it includes everyone on staff, even people with zero due
@@ -518,6 +546,14 @@ export default function DashboardPage() {
       if (dueFilter === "DueOnly" && r.due <= 0) return false;
       if (dueFilter === "PaidOff" && r.due > 0) return false;
 
+      if (urgencyFilter !== "All") {
+        const urgency = paymentUrgency(r.nextPaymentDate, todayIso);
+        if (urgencyFilter === "Overdue" && urgency !== "overdue") return false;
+        if (urgencyFilter === "Soon" && urgency !== "soon") return false;
+      }
+
+      if (reconcileFilter === "Mismatch" && getDataIssues(r, invoiceSalesTotalFor(r)).length === 0) return false;
+
       if (collectedFilter.length > 0) {
         const matchesBucket = collectedBuckets
           .filter((b) => collectedFilter.includes(b.label))
@@ -541,7 +577,7 @@ export default function DashboardPage() {
         r.guestCode.toLowerCase().includes(q)
       );
     });
-  }, [invoices, query, centerFilter, soldByFilter, createdByFilter, nextPaymentFilter, planFilter, dueFilter, collectedFilter, collectedBuckets, saleDateStart, saleDateEnd]);
+  }, [invoices, query, centerFilter, soldByFilter, createdByFilter, nextPaymentFilter, planFilter, dueFilter, urgencyFilter, reconcileFilter, todayIso, invoiceTotalsMap, collectedFilter, collectedBuckets, saleDateStart, saleDateEnd]);
 
   const filtered = useMemo(() => {
     if (itemTypeFilter.length === 0) return baseFiltered;
@@ -775,6 +811,20 @@ export default function DashboardPage() {
               options={["DueOnly", "PaidOff"]}
               optionLabels={{ DueOnly: "Still due", PaidOff: "Fully collected" }}
             />
+            <FilterSelect
+              label="Payment urgency"
+              value={urgencyFilter}
+              onChange={(v) => setUrgencyFilter(v as typeof urgencyFilter)}
+              options={["Overdue", "Soon"]}
+              optionLabels={{ Overdue: "Next payment overdue", Soon: "Due within 3 days" }}
+            />
+            <FilterSelect
+              label="Reconciliation"
+              value={reconcileFilter}
+              onChange={(v) => setReconcileFilter(v as typeof reconcileFilter)}
+              options={["Mismatch"]}
+              optionLabels={{ Mismatch: "Figures don't reconcile" }}
+            />
             <CheckboxFilter
               label="Collected"
               selected={collectedFilter}
@@ -788,6 +838,8 @@ export default function DashboardPage() {
               nextPaymentFilter !== "All" ||
               planFilter !== "All" ||
               dueFilter !== "All" ||
+              urgencyFilter !== "All" ||
+              reconcileFilter !== "All" ||
               collectedFilter.length > 0 ||
               saleDateStart !== "" ||
               // Comparing against a freshly-computed "today" rather than a
@@ -807,6 +859,8 @@ export default function DashboardPage() {
                   setNextPaymentFilter("All");
                   setPlanFilter("All");
                   setDueFilter("All");
+                  setUrgencyFilter("All");
+                  setReconcileFilter("All");
                   setCollectedFilter([]);
                   setSaleDateStart("");
                   setSaleDateEnd(getTodayIso());
@@ -877,7 +931,7 @@ export default function DashboardPage() {
               {!loading &&
                 sorted.map((row, idx) => {
                   const urgency = paymentUrgency(row.nextPaymentDate, todayIso);
-                  const issues = getDataIssues(row);
+                  const issues = getDataIssues(row, invoiceSalesTotalFor(row));
                   const rowBg =
                     urgency === "overdue"
                       ? "bg-[#eec4c4] hover:bg-[#e6b5b5]"
@@ -959,12 +1013,26 @@ export default function DashboardPage() {
         </p>
       </div>
 
-      {selected && <DetailPanel row={selected} onClose={() => setSelected(null)} />}
+      {selected && (
+        <DetailPanel
+          row={selected}
+          invoiceSalesTotal={invoiceSalesTotalFor(selected)}
+          onClose={() => setSelected(null)}
+        />
+      )}
     </div>
   );
 }
 
-function DetailPanel({ row, onClose }: { row: InvoiceRow; onClose: () => void }) {
+function DetailPanel({
+  row,
+  invoiceSalesTotal,
+  onClose,
+}: {
+  row: InvoiceRow;
+  invoiceSalesTotal: number;
+  onClose: () => void;
+}) {
   const installments = [
     { label: "1st payment", date: row.payment1Date, amount: row.payment1Amount },
     { label: "2nd payment", date: row.payment2Date, amount: row.payment2Amount },
@@ -972,7 +1040,8 @@ function DetailPanel({ row, onClose }: { row: InvoiceRow; onClose: () => void })
   ].filter((p) => p.date);
   const planTotal = installments.reduce((sum, p) => sum + (p.amount ?? 0), 0);
   const urgency = paymentUrgency(row.nextPaymentDate, getTodayIso());
-  const issues = getDataIssues(row);
+  const issues = getDataIssues(row, invoiceSalesTotal);
+  const isMultiItemInvoice = invoiceSalesTotal !== row.salesIncTax;
   const [copied, setCopied] = useState(false);
 
   async function handleCopyInvoiceNo() {
@@ -1114,11 +1183,19 @@ function DetailPanel({ row, onClose }: { row: InvoiceRow; onClose: () => void })
                 ))}
               </ul>
               <div className="flex items-center justify-between px-3 pt-2.5 text-sm">
-                <span className="text-[#a8988d]">Plan total vs. Sales (Inc. Tax)</span>
+                <span className="text-[#a8988d]">
+                  Plan total vs. {isMultiItemInvoice ? "invoice" : "Sales (Inc. Tax)"}
+                </span>
                 <span className="tabular-nums font-medium">
-                  ₹{formatINR(planTotal)} / ₹{formatINR(row.salesIncTax)}
+                  ₹{formatINR(planTotal)} / ₹{formatINR(invoiceSalesTotal)}
                 </span>
               </div>
+              {isMultiItemInvoice && (
+                <p className="text-xs text-[#a8988d] px-3 pt-1">
+                  This invoice has more than one line item — the plan is compared against the invoice&apos;s
+                  combined Sales (Inc. Tax), not just this item&apos;s ₹{formatINR(row.salesIncTax)} share.
+                </p>
+              )}
             </>
           )}
         </div>
