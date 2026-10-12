@@ -115,10 +115,14 @@ function ddmmyyyyToIso(s: string): string | null {
   return `${yyyy}-${mm.padStart(2, "0")}-${dd.padStart(2, "0")}`;
 }
 
-// Client-only (called from an effect after mount, never during the
-// server render pass) so "today"/"yesterday" reflect the viewer's own
-// local timezone rather than the server's — those can disagree on which
-// calendar day it is for hours at a time otherwise.
+// Only ever called once, from the mount effect below, which stores the
+// result in the todayIso state - never call this directly during render.
+// The server and the viewer's own browser can disagree on which calendar
+// day it is for hours at a time (different timezones), so a value read
+// during the render pass can be server-side and client-side inconsistent -
+// that previously made today's own date render as out-of-range/unselectable
+// in the Sale Date filter. Everything that needs "today" must read the
+// todayIso state (or a prop threaded from it), not call this again.
 function getTodayIso(): string {
   const d = new Date();
   const yyyy = d.getFullYear();
@@ -1016,6 +1020,7 @@ export default function DashboardPage() {
         <DetailPanel
           row={selected}
           invoiceSalesTotal={invoiceSalesTotalFor(selected)}
+          todayIso={todayIso}
           onClose={() => setSelected(null)}
         />
       )}
@@ -1026,10 +1031,12 @@ export default function DashboardPage() {
 function DetailPanel({
   row,
   invoiceSalesTotal,
+  todayIso,
   onClose,
 }: {
   row: InvoiceRow;
   invoiceSalesTotal: number;
+  todayIso: string;
   onClose: () => void;
 }) {
   const installments = [
@@ -1038,7 +1045,7 @@ function DetailPanel({
     { label: "3rd payment", date: row.payment3Date, amount: row.payment3Amount },
   ].filter((p) => p.date);
   const planTotal = installments.reduce((sum, p) => sum + (p.amount ?? 0), 0);
-  const urgency = paymentUrgency(row.nextPaymentDate, getTodayIso());
+  const urgency = paymentUrgency(row.nextPaymentDate, todayIso);
   const issues = getDataIssues(row, invoiceSalesTotal);
   const isMultiItemInvoice = invoiceSalesTotal !== row.salesIncTax;
   const [copied, setCopied] = useState(false);
