@@ -137,14 +137,6 @@ function addDaysIso(iso: string, days: number): string {
   return `${yyyy}-${mm}-${dd}`;
 }
 
-// due_invoices_report only ever covers a rolling last-30-days window
-// (today back through 29 days ago) - a fixed earliest date would drift out
-// of sync with that window a little more every day, eventually letting
-// staff pick date ranges the backend can never actually return data for.
-function earliestSaleDateIso(): string {
-  return addDaysIso(getTodayIso(), -29);
-}
-
 type PaymentUrgency = "overdue" | "soon" | null;
 
 // "soon" = due today through 3 days out; "overdue" = anything before
@@ -770,12 +762,19 @@ export default function DashboardPage() {
             <CheckboxFilter label="Item type" selected={itemTypeFilter} onChange={setItemTypeFilter} options={itemTypes} />
             <div className="flex items-center gap-1.5 text-sm text-[#7a685e]">
               <span>Sale date</span>
+              {/* due_invoices_report only ever covers a rolling last-30-days
+                  window, so the lower bound tracks today - 29 rather than a
+                  fixed date. Both bounds come from the todayIso state (set
+                  client-side after mount), not a fresh Date() call here -
+                  calling it directly during render let the server's and the
+                  viewer's own clocks disagree on "today" for hours at a
+                  time, which could make today's own date unselectable. */}
               <input
                 type="date"
                 aria-label="Sale date from"
                 value={saleDateStart}
-                min={earliestSaleDateIso()}
-                max={getTodayIso()}
+                min={todayIso ? addDaysIso(todayIso, -29) : undefined}
+                max={todayIso || undefined}
                 onChange={(e) => setSaleDateStart(e.target.value)}
                 className="border border-[#e7dcd4] rounded-lg px-2 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#7a2e40] focus:border-transparent"
               />
@@ -784,8 +783,8 @@ export default function DashboardPage() {
                 type="date"
                 aria-label="Sale date to"
                 value={saleDateEnd}
-                min={earliestSaleDateIso()}
-                max={getTodayIso()}
+                min={todayIso ? addDaysIso(todayIso, -29) : undefined}
+                max={todayIso || undefined}
                 onChange={(e) => setSaleDateEnd(e.target.value)}
                 className="border border-[#e7dcd4] rounded-lg px-2 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#7a2e40] focus:border-transparent"
               />
@@ -847,7 +846,7 @@ export default function DashboardPage() {
               // counts as an active filter worth offering to clear back to
               // baseline (today's data is real now, via the same-day
               // supplement, so it's the default upper bound, not yesterday).
-              saleDateEnd !== getTodayIso() ||
+              saleDateEnd !== todayIso ||
               query) && (
               <button
                 onClick={() => {
@@ -863,7 +862,7 @@ export default function DashboardPage() {
                   setReconcileFilter("All");
                   setCollectedFilter([]);
                   setSaleDateStart("");
-                  setSaleDateEnd(getTodayIso());
+                  setSaleDateEnd(todayIso);
                 }}
                 className="text-sm px-3 py-1.5 rounded-lg text-[#7a2e40] hover:bg-[#f6e2e7] transition-colors"
               >
