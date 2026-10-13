@@ -666,8 +666,11 @@ export default function DashboardPage() {
   }
 
   return (
-    <div className="min-h-screen bg-[#faf5f1] text-[#2a211d]">
-      <div className="w-full px-4 sm:px-8 lg:px-12 py-10">
+    <div className="h-screen flex flex-col overflow-hidden bg-[#faf5f1] text-[#2a211d]">
+      {/* Header, KPI row and filters are pinned - they never scroll out of
+          view. Only the table area below (its own independent scroll
+          region, with the column header row sticky inside it too) moves. */}
+      <div className="shrink-0 w-full px-4 sm:px-8 lg:px-12 pt-8 pb-4 bg-[#faf5f1] border-b border-[#e7dcd4] shadow-[0_6px_14px_-10px_rgba(42,33,29,0.25)] relative z-20">
         <header className="mb-8">
           <p className="text-xs font-semibold tracking-wide uppercase text-[#7a2e40] mb-2">
             Isaac Wellness · Due Invoices
@@ -875,16 +878,23 @@ export default function DashboardPage() {
             )}
           </div>
         </div>
+      </div>
 
+      {/* Scroll region: only this area moves. The table card itself is the
+          scrolling element (not an outer wrapper) so its own thead can
+          stick to ITS top as rows scroll underneath — an overflow-hidden
+          ancestor between a sticky element and its scrolling container
+          would otherwise stop the stickiness from working. */}
+      <div className="flex-1 min-h-0 w-full px-4 sm:px-8 lg:px-12 py-4 flex flex-col gap-3">
         {/* Table — fixed-width columns summing to 100% so the table never
             exceeds the viewport width; cells wrap instead of overflowing,
-            so the page only ever scrolls vertically, never sideways. Center,
+            so the table only ever scrolls vertically, never sideways. Center,
             item, type, collected, next payment and plan only join once
             there's enough width to show them without cramming — they're
             always available in the detail panel on tap/click regardless. */}
-        <div className="bg-white border border-[#e7dcd4] rounded-xl shadow-sm overflow-hidden">
+        <div className="flex-1 min-h-0 bg-white border border-[#e7dcd4] rounded-xl shadow-sm overflow-y-auto">
           <table className="w-full text-sm">
-            <thead>
+            <thead className="sticky top-0 z-10 bg-white">
               <tr className="border-b border-[#e7dcd4]">
                 <SortHeader label="Sale date" sortKeyName="saleDate" />
                 <SortHeader label="Invoice" sortKeyName="invoiceNo" />
@@ -1011,7 +1021,7 @@ export default function DashboardPage() {
           </table>
         </div>
 
-        <p className="text-xs text-[#a8988d] mt-3">
+        <p className="shrink-0 text-xs text-[#a8988d]">
           Showing {sorted.length} of {invoices?.length ?? 0} line items. Click a row for full detail.
         </p>
       </div>
