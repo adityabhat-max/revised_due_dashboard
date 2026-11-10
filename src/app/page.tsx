@@ -171,26 +171,36 @@ interface DataIssue {
 // means the installments can always be summed and checked as soon as
 // any of them exist, no "wait until all 3 are filled" logic needed.
 //
-// invoiceSalesTotal defaults to this row's own Sales (Inc. Tax) but
-// should be passed as the sum across every line item on the invoice —
+// invoiceSalesTotal/invoiceDueTotal default to this row's own Sales/Due
+// but should be passed as the sum across every line item on the invoice —
 // the payment-plan note is invoice-level (identical on every item row
-// of a multi-item invoice), while Sales (Inc. Tax) is per line item, so
-// comparing the plan against a single item's share of a multi-item
-// invoice flags a false mismatch every time (confirmed live: GKR68693,
-// a 2-item invoice, has its real plan compared against each item's
-// ~28%/72% split instead of the invoice's actual total).
-function getDataIssues(row: InvoiceRow, invoiceSalesTotal: number = row.salesIncTax): DataIssue[] {
+// of a multi-item invoice), while Sales (Inc. Tax) and Due are per line
+// item, so comparing the plan against a single item's share of a
+// multi-item invoice flags a false mismatch every time (confirmed live:
+// GKR68693, a 2-item invoice, has its real plan compared against each
+// item's ~28%/72% split instead of the invoice's actual total).
+function getDataIssues(
+  row: InvoiceRow,
+  invoiceSalesTotal: number = row.salesIncTax,
+  invoiceDueTotal: number = row.due,
+): DataIssue[] {
   const issues: DataIssue[] = [];
 
   if (row.payment1Amount != null) {
-    // The plan documents the invoice's full payment schedule - past
-    // installments already collected included, not just what's still
-    // owed - so it should reconcile against the full Sales (Inc. Tax),
-    // not against Due (e.g. a 2-installment plan where the 1st was
-    // already paid and only the 2nd remains still sums to the total).
+    // A plan on file legitimately sums to one of two things: the FULL
+    // sale (written up front, before anything was collected - the common
+    // case, past installments already collected included), or just what's
+    // still Due (written later, for the remainder, after a deposit was
+    // already collected outside the plan - confirmed live on BLRR23096:
+    // ₹25,000 collected + a single ₹1,25,000 installment for the
+    // ₹1,25,001 still due). Per the user, 2026-11-10: the second pattern
+    // is intentional, not a data error, so only flag when the plan
+    // matches neither - checked against a sample of invoices with a plan
+    // on file, 15/17 matched Sales, 2/17 (incl. BLRR23096) matched Due.
     const planTotal = (row.payment1Amount ?? 0) + (row.payment2Amount ?? 0) + (row.payment3Amount ?? 0);
     const diff = planTotal - invoiceSalesTotal;
-    if (Math.abs(diff) > AMOUNT_TOLERANCE) {
+    const matchesDue = Math.abs(planTotal - invoiceDueTotal) <= AMOUNT_TOLERANCE;
+    if (Math.abs(diff) > AMOUNT_TOLERANCE && !matchesDue) {
       issues.push({
         label: "Payment plan doesn't match Sales (Inc. Tax)",
         detail:
@@ -495,6 +505,25 @@ export default function DashboardPage() {
     return invoiceTotalsMap.get(row.invoiceNo) ?? row.salesIncTax;
   }
 
+  // Same aggregation as invoiceTotalsMap, for Due instead of Sales (Inc.
+  // Tax) - feeds getDataIssues's payment-plan check now that it also
+  // accepts a plan matching what's still Due (see that function's
+  // comment). Without this, a multi-item invoice would hit the same false
+  // mismatch invoiceTotalsMap was built to avoid, just against Due instead
+  // of Sales.
+  const invoiceDueTotalsMap = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const r of invoices || []) {
+      if (!r.invoiceNo) continue;
+      map.set(r.invoiceNo, (map.get(r.invoiceNo) || 0) + r.due);
+    }
+    return map;
+  }, [invoices]);
+
+  function invoiceDueTotalFor(row: InvoiceRow): number {
+    return invoiceDueTotalsMap.get(row.invoiceNo) ?? row.due;
+  }
+
   const soldByList = useMemo(() => {
     // Prefer the Sheet6 staff roster when available (scoped to the selected
     // center(s)) — it includes everyone on staff, even people with zero due
@@ -548,7 +577,7 @@ export default function DashboardPage() {
         if (urgencyFilter === "Soon" && urgency !== "soon") return false;
       }
 
-      if (reconcileFilter === "Mismatch" && getDataIssues(r, invoiceSalesTotalFor(r)).length === 0) return false;
+      if (reconcileFilter === "Mismatch" && getDataIssues(r, invoiceSalesTotalFor(r), invoiceDueTotalFor(r)).length === 0) return false;
 
       if (collectedFilter.length > 0) {
         const matchesBucket = collectedBuckets
@@ -944,7 +973,7 @@ export default function DashboardPage() {
               {!loading &&
                 sorted.map((row, idx) => {
                   const urgency = paymentUrgency(row.nextPaymentDate, todayIso);
-                  const issues = getDataIssues(row, invoiceSalesTotalFor(row));
+                  const issues = getDataIssues(row, invoiceSalesTotalFor(row), invoiceDueTotalFor(row));
                   const rowBg =
                     urgency === "overdue"
                       ? "bg-[#eec4c4] hover:bg-[#e6b5b5]"
@@ -1030,6 +1059,7 @@ export default function DashboardPage() {
         <DetailPanel
           row={selected}
           invoiceSalesTotal={invoiceSalesTotalFor(selected)}
+          invoiceDueTotal={invoiceDueTotalFor(selected)}
           todayIso={todayIso}
           onClose={() => setSelected(null)}
         />
@@ -1041,11 +1071,13 @@ export default function DashboardPage() {
 function DetailPanel({
   row,
   invoiceSalesTotal,
+  invoiceDueTotal,
   todayIso,
   onClose,
 }: {
   row: InvoiceRow;
   invoiceSalesTotal: number;
+  invoiceDueTotal: number;
   todayIso: string;
   onClose: () => void;
 }) {
@@ -1056,7 +1088,7 @@ function DetailPanel({
   ].filter((p) => p.date);
   const planTotal = installments.reduce((sum, p) => sum + (p.amount ?? 0), 0);
   const urgency = paymentUrgency(row.nextPaymentDate, todayIso);
-  const issues = getDataIssues(row, invoiceSalesTotal);
+  const issues = getDataIssues(row, invoiceSalesTotal, invoiceDueTotal);
   const isMultiItemInvoice = invoiceSalesTotal !== row.salesIncTax;
   const [copied, setCopied] = useState(false);
 
