@@ -1090,6 +1090,15 @@ function DetailPanel({
   const urgency = paymentUrgency(row.nextPaymentDate, todayIso);
   const issues = getDataIssues(row, invoiceSalesTotal, invoiceDueTotal);
   const isMultiItemInvoice = invoiceSalesTotal !== row.salesIncTax;
+  // getDataIssues accepts a plan matching either the full Sales total or
+  // just what's still Due (see its comment) - this panel defaulted to
+  // always displaying the Sales comparison, so a plan that was correctly
+  // accepted against Due (no warning box below) still printed a line that
+  // reads exactly like a mismatch, e.g. "₹40,000 / ₹50,000" for BLRR23060.
+  // Show whichever total the plan actually matches.
+  const matchesSales = Math.abs(planTotal - invoiceSalesTotal) <= AMOUNT_TOLERANCE;
+  const matchesDue = Math.abs(planTotal - invoiceDueTotal) <= AMOUNT_TOLERANCE;
+  const compareToDue = matchesDue && !matchesSales;
   const [copied, setCopied] = useState(false);
 
   async function handleCopyInvoiceNo() {
@@ -1232,13 +1241,19 @@ function DetailPanel({
               </ul>
               <div className="flex items-center justify-between px-3 pt-2.5 text-sm">
                 <span className="text-[#a8988d]">
-                  Plan total vs. {isMultiItemInvoice ? "invoice" : "Sales (Inc. Tax)"}
+                  Plan total vs. {compareToDue ? "Due" : isMultiItemInvoice ? "invoice" : "Sales (Inc. Tax)"}
                 </span>
                 <span className="tabular-nums font-medium">
-                  ₹{formatINR(planTotal)} / ₹{formatINR(invoiceSalesTotal)}
+                  ₹{formatINR(planTotal)} / ₹{formatINR(compareToDue ? invoiceDueTotal : invoiceSalesTotal)}
                 </span>
               </div>
-              {isMultiItemInvoice && (
+              {compareToDue && (
+                <p className="text-xs text-[#a8988d] px-3 pt-1">
+                  This plan was written for what&apos;s still due (₹{formatINR(invoiceDueTotal)}), not the full
+                  ₹{formatINR(invoiceSalesTotal)} Sales (Inc. Tax) — accepted as valid.
+                </p>
+              )}
+              {isMultiItemInvoice && !compareToDue && (
                 <p className="text-xs text-[#a8988d] px-3 pt-1">
                   This invoice has more than one line item — the plan is compared against the invoice&apos;s
                   combined Sales (Inc. Tax), not just this item&apos;s ₹{formatINR(row.salesIncTax)} share.
